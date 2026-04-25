@@ -4,13 +4,11 @@ namespace Backend.DTO
 {
     public class UpdateFavoriteRequest
     {
-        [Required]
-        [RegularExpression(@"^[a-zA-Z0-9'\- ]+$")]
-        public string AccountName { get; set; }
+        [RegularExpression(@"^[a-zA-Z0-9' -]+$", ErrorMessage = "Invalid name")]
+        public string? AccountName { get; set; }
 
-        [Required]
         [MaxLength(20)]
-        [RegularExpression(@"^[a-zA-Z0-9]+$")]
-        public string IBAN { get; set; }
+        [RegularExpression(@"^[a-zA-Z0-9]+$", ErrorMessage = "Invalid IBAN")]
+        public string? IBAN { get; set; }
     }
 }

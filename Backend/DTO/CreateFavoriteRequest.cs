@@ -4,8 +4,8 @@ namespace Backend.DTO
 {
     public class CreateFavoriteRequest
     {
-        [Required]
-        public int CustomerId { get; set; }
+        //[Required]
+        //public int CustomerId { get; set; }
 
         [Required]
         [RegularExpression(@"^[a-zA-Z0-9'\- ]+$", ErrorMessage = "Invalid name")]

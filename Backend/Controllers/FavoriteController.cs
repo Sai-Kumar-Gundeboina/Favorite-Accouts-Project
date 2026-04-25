@@ -1,11 +1,13 @@
 ﻿using Backend.Data;
 using Backend.DTO;
 using Backend.Models;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using System.Security.Claims;
 
 namespace Backend.Controllers
 {
-
+    [Authorize]
     [ApiController]
     [Route("api/favorites")]
     public class FavoriteController : ControllerBase
@@ -24,19 +26,21 @@ namespace Backend.Controllers
             if (!ModelState.IsValid)
                 return BadRequest(ModelState);
 
+            var customerId = GetCustomerId()
+                ;
             //checking whether customer id is valid or not
             var customerExists = _context.Customers
-        .Any(c => c.Id == request.CustomerId);
+        .Any(c => c.Id == customerId);
 
             if (!customerExists)
                 return BadRequest("Invalid CustomerId");
 
             //checking for duplicate IBAN number
             var exists = _context.FavoriteAccounts
-    .Any(x => x.CustomerId == request.CustomerId && x.IBAN == request.IBAN);
+    .Any(x => x.CustomerId == customerId && x.IBAN == request.IBAN);
 
             if (exists)
-                return BadRequest("This IBAN is already added for this customer");
+                return BadRequest("This IBAN is already added for another customer");
 
             if (request.IBAN.Length < 8)
                 return BadRequest("Invalid IBAN format");
@@ -49,14 +53,14 @@ namespace Backend.Controllers
 
             // max 20 accounts check
             var count = _context.FavoriteAccounts
-                .Count(x => x.CustomerId == request.CustomerId);
+                .Count(x => x.CustomerId == customerId);
 
             if (count >= 20)
                 return BadRequest("Max 20 favorite accounts allowed");
 
             var entity = new FavoriteAccount
             {
-                CustomerId = request.CustomerId,
+                CustomerId = customerId,
                 AccountName = request.AccountName,
                 IBAN = request.IBAN,
                 BankCode = bankCode,
@@ -71,8 +75,9 @@ namespace Backend.Controllers
 
         // GET (with pagination)
         [HttpGet]
-        public IActionResult Get(int customerId, int page = 1, int pageSize = 5)
+        public IActionResult Get(int page = 1, int pageSize = 5)
         {
+            var customerId = GetCustomerId();
             var query = _context.FavoriteAccounts
                 .Where(x => x.CustomerId == customerId);
 
@@ -90,19 +95,49 @@ namespace Backend.Controllers
         [HttpPut("{id}")]
         public IActionResult Update(int id, UpdateFavoriteRequest request)
         {
-            var entity = _context.FavoriteAccounts.Find(id);
-            if (entity == null) return NotFound();
+            if (request == null)
+                return BadRequest("Request body is required");
 
-            var bankCode = request.IBAN.Substring(4, 4);
-            var bank = _context.BankLookups.FirstOrDefault(b => b.Code == bankCode);
+            var customerId = GetCustomerId();
 
-            if (bank == null)
-                return BadRequest("Invalid IBAN");
+            var entity = _context.FavoriteAccounts
+                .FirstOrDefault(x => x.Id == id && x.CustomerId == customerId);
 
-            entity.AccountName = request.AccountName;
-            entity.IBAN = request.IBAN;
-            entity.BankCode = bankCode;
-            entity.BankName = bank.BankName;
+            if (entity == null)
+                return NotFound("Favorite not found");
+
+            if (!string.IsNullOrWhiteSpace(request.AccountName))
+            {
+                entity.AccountName = request.AccountName;
+            }
+            
+            if (!string.IsNullOrWhiteSpace(request.IBAN))
+            {
+                if (request.IBAN.Length < 8)
+                    return BadRequest("Invalid IBAN");
+
+                var bankCode = request.IBAN.Substring(4, 4);
+
+                var bank = _context.BankLookups
+                    .FirstOrDefault(b => b.Code == bankCode);
+
+                if (bank == null)
+                    return BadRequest("Invalid IBAN");
+
+                // duplicate check
+                var exists = _context.FavoriteAccounts.Any(x =>
+                    x.CustomerId == customerId &&
+                    x.IBAN == request.IBAN &&
+                    x.Id != id);
+
+                if (exists)
+                    return BadRequest("IBAN already exists");
+
+                entity.IBAN = request.IBAN;
+                entity.BankCode = bankCode;
+                entity.BankName = bank.BankName;
+            }
+
             entity.UpdatedAt = DateTime.UtcNow;
 
             _context.SaveChanges();
@@ -114,7 +149,10 @@ namespace Backend.Controllers
         [HttpDelete("{id}")]
         public IActionResult Delete(int id)
         {
-            var entity = _context.FavoriteAccounts.Find(id);
+            var customerId = GetCustomerId();
+
+            var entity = _context.FavoriteAccounts
+                .FirstOrDefault(x => x.Id == id && x.CustomerId == customerId);
             if (entity == null) return NotFound();
 
             _context.FavoriteAccounts.Remove(entity);
@@ -124,10 +162,12 @@ namespace Backend.Controllers
         }
 
         [HttpGet("check-iban")]
-        public IActionResult CheckIban(int customerId, string iban)
+        public IActionResult CheckIban(string iban)
         {
             if (string.IsNullOrWhiteSpace(iban))
                 return BadRequest("IBAN is required");
+
+            var customerId = GetCustomerId();
 
             // Check customer exists
             var customerExists = _context.Customers
@@ -147,6 +187,11 @@ namespace Backend.Controllers
                 isDuplicate = exists
             });
 
+        }
+        private int GetCustomerId()
+        {
+            var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            return int.Parse(userId);
         }
     }
 }
